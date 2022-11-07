@@ -1,0 +1,76 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+This is an [R Markdown](http://rmarkdown.rstudio.com) Notebook. When you execute code within the notebook, the results appear beneath the code. 
+
+Try executing this chunk by clicking the *Run* button within the chunk or by placing your cursor inside it and pressing *Ctrl+Shift+Enter*. 
+
+```{r}
+
+data("JSS_papers", package = "corpus.JSS.papers")
+df = data.frame(JSS_papers)
+
+```
+```{r}
+JSS_papers <- JSS_papers[JSS_papers[,"date"] < "2010-08-05",]
+JSS_papers <- JSS_papers[sapply(JSS_papers[, "description"],Encoding) == "unknown",]
+dim(JSS_papers)
+```
+```{r}
+
+library("tm")
+library("XML")
+
+remove_HTML_markup <- function(s) tryCatch({doc <- htmlTreeParse(
+  paste("", s), asText = TRUE, trim = FALSE)
+xmlValue(xmlRoot(doc))
+}, error = function(s) s)
+corpus <- Corpus(VectorSource(sapply(JSS_papers[, "description"],
+remove_HTML_markup)))
+```
+
+```{r}
+Sys.setlocale("LC_COLLATE", "C") #this is just to make sure we will have the same results
+JSS_dtm <- DocumentTermMatrix(corpus, control = list(stemming =TRUE, 
+                                                     stopwords = TRUE, minWordLength = 3,
+                                                     removeNumbers = TRUE,
+                                                     removePunctuation = TRUE))
+
+```
+
+
+# tf-idf
+```{r}
+library("slam")
+
+summary(col_sums(JSS_dtm))
+term_tfidf <- tapply(JSS_dtm$v/row_sums(JSS_dtm)[JSS_dtm$i],
+                     JSS_dtm$j, mean) * log2(nDocs(JSS_dtm)/col_sums(JSS_dtm > 0))
+ summary(term_tfidf)
+JSS_dtm <- JSS_dtm[,term_tfidf >= 0.1]
+JSS_dtm <- JSS_dtm[row_sums(JSS_dtm) > 0,]
+summary(col_sums(JSS_dtm))
+```
+
+
+```{r}
+library("topicmodels")
+k <- 30
+SEED <- 2010
+jss_TM <- LDA(JSS_dtm, k = k, method = "Gibbs", control = 
+                list(seed = SEED, burnin = 1000, thin = 100, iter = 1000))
+```
+
+
+```{r}
+Topic <- topics(jss_TM,1)
+Topic
+
+Terms <- terms(jss_TM, 5)
+Terms[,1:5] #list the frequent terms of the first 5 topics
+
+```
+
+
