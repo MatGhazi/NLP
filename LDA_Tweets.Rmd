@@ -1,0 +1,86 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+# first, Load the tweets file and make a dataframe from file.
+```{r}
+library('twitteR')
+
+tweets <- get(load('Tweets.RData'))
+df <- do.call("rbind", lapply(tweets, as.data.frame))
+```
+
+# In this stage, remove url, digits and non-english letters
+```{r}
+library("stringr")
+# df <- head(df_t,41)
+removeURL <- function(x) gsub("http[[:alnum:][:punct:]]*", "", x)
+df[,'text'] <- sapply( df[,'text'],removeURL)
+df[,'text'] <- sapply( df[,'text'],tolower)
+df[,'text'] <- str_replace_all(df[,'text'] , '[[:digit:]]+', "")  # remove digits
+df[,'text'] <- str_replace_all(df[,'text'] , "[^[\\da-zA-Z ]]", "") # remove non-english letters
+```
+
+# build a corpus from text data and then make a matrix of corpus contains the frequency of words in each document. To find the frequency of word in all documents, we need to calculate the summation of frequency in all documents. As a word might occurs in one document more than one time.So, insted of sumRows, I use sum function. The following output shows the frequency of data and mining. The dimension shows that we are goinig to work with 320 document and 969 terms.
+```{r}
+library("tm")
+library("XML")
+corpus <- Corpus(VectorSource(as.vector(df[,'text'])))
+# Sys.setlocale("LC_COLLATE", "C") #this is just to make sure we will have the same results
+words_Mat <- DocumentTermMatrix(corpus, control = list(
+                                                    # stemming =TRUE, 
+                                                     stopwords = TRUE,
+                                                     minWordLength = 3,
+                                                     removeNumbers = TRUE,
+                                                     removePunctuation = TRUE,
+                                                     stripWhitespace = TRUE
+                                                    ))
+
+tdmatrix<-as.matrix(words_Mat)
+data<- sum(tdmatrix[,('data')])
+mining <- sum(tdmatrix[,('mining')])
+
+paste("data: ", data, "    mining: ", mining, sep="")
+dim(words_Mat) # number of documents and words
+```
+# In the following cell, to find the word cloud, we shoud find the summation of frequency of each word in all the documents and then plot the word and set its size based on the magnitude of frequency.
+```{r}
+library("slam")
+words <- sort(col_sums(words_Mat),decreasing=TRUE)# find frequency of each word
+word_freq <- data.frame(word = names(words),freq=words)
+
+
+
+library(wordcloud)
+set.seed(1234) # for reproducibility 
+wordcloud(words = word_freq$word, freq = word_freq$freq, min.freq = 1,           max.words=200, random.order=FALSE, rot.per=0.35,   colors=brewer.pal(8, "Dark2"))
+```
+# The term frequency-inverse document frequency (tf-idf) is used to filter words that their frequency is in the bound that we want. First we calculate median of tf-idf of all words and use it as a threshold. Select those words that have a tf-idf more that median which implies very frequent terms are removed. The dimension after filteration shows that we are goinig to work with 274 documents and 487 terms which decreases compared with last stage.
+```{r}
+library("slam")
+summary(col_sums(words_Mat))
+term_tfidf <- tapply(words_Mat$v/row_sums(words_Mat)[words_Mat$i],
+                     words_Mat$j, mean) * log2(nDocs(words_Mat)/col_sums(words_Mat > 0))
+summary(term_tfidf)
+
+words_ <- words_Mat[,term_tfidf >= 0.8558] # filter words with tf-idf higher than the mean.
+words_ <- words_[row_sums(words_) > 0,]
+summary(col_sums(words_))
+dim(words_)
+
+```
+# We need to define the number of topics and feed the LDA model with matrix of words that is output of tf-idf filteration. The output shows all topics with first six frequent terms.
+```{r}
+library("topicmodels")
+num_topics <- 8
+SEED <- 2010
+LDA_tweet <- LDA(words_, k = num_topics, method = "Gibbs", control = 
+                list(seed = SEED, burnin = 1000, thin = 100, iter = 1000))
+
+# Topic <- topics(LDA_tweet,1)
+# Topic
+Terms <- terms(LDA_tweet, 6)
+Terms #list the frequent terms of the first 5 topics
+
+```
